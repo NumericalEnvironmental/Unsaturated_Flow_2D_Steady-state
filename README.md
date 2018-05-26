@@ -1,6 +1,8 @@
 # Unsaturated_Flow_2D_Steady-state
 
-This script, written in Julia (v. 0.6), solves the steady-state form of the Richards equation for variably-saturated flow in porous media in a two-dimensional vertical cross section. Model output can be used, for example, to understand the distribution of soil moisture or the formation of perched aquifers in heterogeneous soils under different types of boundary conditions. The model iteratively solves the non-linear flow problem by solving a matrix of flow-balance equations for recent-estimate values of matrix potential, then updating hydraulic conductivity values as a function of matrix potential. More information is available in my blog post, (link pending).
+![Preview](https://numericalenvironmental.files.wordpress.com/2018/05/sat_script.png?w=1632)
+
+This script, written in Julia (v. 0.6), solves the steady-state form of the Richards equation for variably-saturated flow in porous media in a two-dimensional vertical cross section. Model output can be used, for example, to understand the distribution of soil moisture or the formation of perched aquifers in heterogeneous soils under different types of boundary conditions. The model iteratively solves the non-linear flow problem by solving a matrix of flow-balance equations for recent-estimate values of matrix potential, then updating hydraulic conductivity values as a function of matrix potential. More information is available in my blog post, https://numericalenvironmental.wordpress.com/2018/05/26/a-steady-state-variably-saturated-flow-model-in-vertical-cross-section-a-finite-difference-approach-using-julia/.
 
 The following space- or tab-delimited text input files are all required:
 
