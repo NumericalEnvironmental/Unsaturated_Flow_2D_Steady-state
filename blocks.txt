@@ -1,0 +1,2 @@
+x0	z0	xf	zf	material
+0	25	65	30	clay

@@ -1,0 +1,5 @@
+xLength	100
+zLength	60
+nx	100
+nz	60
+default	silt
