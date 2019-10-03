@@ -1,5 +1,5 @@
-xLength	100
-zLength	60
+xLength	50
+zLength	25
 nx	100
-nz	60
-default	silt
+nz	50
+default	m50

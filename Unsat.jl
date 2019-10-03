@@ -2,7 +2,7 @@
 #
 # Unsat.jl
 #
-# by Walt McNab (May 2018)
+# by Walt McNab (May 2018; updated in October 2019)
 #
 # A numerical model for steady-state, unsaturated flow
 # in porous media, assuming a single fluid phase and passive gas phase
@@ -12,10 +12,15 @@
 ########################################################################
 
 
+using SparseArrays
+using DelimitedFiles
+using Statistics
+
+
 ### defined types ###
 
 
-type Material
+mutable struct Material
     name::AbstractString
     Kh::Float64                         # (saturated) hydraulic conductivity components
     Kz::Float64
@@ -26,7 +31,7 @@ type Material
 end
 
 
-type Cell
+mutable struct Cell
     x::Float64                          # grid cell center coordinates
     z::Float64
     P::Float64                          # pressure head (psi)
@@ -38,7 +43,7 @@ type Cell
 end
 
 
-type Domain
+mutable struct Domain
     xLength::Float64                    # model discretization
     zLength::Float64
     nx::Int64
@@ -51,7 +56,7 @@ type Domain
 end
 
 
-type Solver
+mutable struct Solver
     psi0::Float64                       # initial pressure across entire model domain (to start iterations)
     f::Float64                          # pressure correction weighting factor, per iteration
     maxIter::Int64                      # number of iterations
@@ -61,46 +66,46 @@ end
 ### support functions (physics) ###
 
 
-function kr(psi, material)
+function kr(psi::Float64, material::Material)::Float64
     # relative permeability (Van Genuchten/Mualem model)
-    if psi < 0.
-        y1 = 1. + abs(material.alpha * psi)^material.N
-        y2 = 1. - abs(material.alpha * psi)^(material.N - 1.) * y1^(-material.m)
-        k = y2^2 / y1^(material.m/2.)
+    if psi < 0.0
+        y1 = 1.0 + abs(material.alpha * psi)^material.N
+        y2 = 1.0 - abs(material.alpha * psi)^(material.N - 1.0) * y1^(-material.m)
+        k = y2^2 / y1^(material.m/2.0)
     else
-        k = 1.
+        k = 1.0
     end
     return k
 end
 
 
-function Se(psi, material)
+function Se(psi::Float64, material::Material)::Float64
     # effective saturation (Van Genuchten/Mualem model)
-    if psi < 0.
-        satEff = (1. + abs(material.alpha * psi)^material.N)^(-material.m)
+    if psi < 0.0
+        satEff = (1.0 + abs(material.alpha * psi)^material.N)^(-material.m)
     else
-        satEff = 1.
+        satEff = 1.0
     end
     return satEff
 end
 
 
-function S(psi, material)
+function S(psi::Float64, material::Material)::Float64
     # saturation vs relative saturation
-    return Se(psi, material) * (1. - material.sr) + material.sr
+    return Se(psi, material) * (1.0 - material.sr) + material.sr
 end
 
 
 ### support functions (utility) ###
 
 
-function HMean2(a, b)
+function HMean2(a::Float64, b::Float64)::Float64
     # harmonic mean of two numbers
-    return 2./(1./a + 1./b)
+    return 2.0/(1.0/a + 1.0/b)
 end
 
 
-function GetIndex(x, z, domain)
+function GetIndex(x::Float64, z::Float64, domain::Domain)::Int64
     # find the index number of nearest cell object associated with location (x, y)
     row = maximum([round(Int64, z/domain.dz + 0.5), 1])
     col = maximum([round(Int64, x/domain.dx + 0.5), 1])
@@ -108,7 +113,7 @@ function GetIndex(x, z, domain)
 end
 
 
-function GetMatNum(material, name)
+function GetMatNum(material::Array{Material, 1}, name::AbstractString)::Int64
     # return the index number of name in the materials list
     index = 0
     for (i, mat) in enumerate(material)
@@ -121,7 +126,7 @@ function GetMatNum(material, name)
 end
 
 
-function CreateCells(domain, matNum, psi0)
+function CreateCells(domain::Domain, matNum::Int64, psi0::Float64)::Array{Cell, 1}
     # create cell objects with default material assignment and initial pressure head
     cell = Cell[]
     for j = 1:domain.nz, i = 1:domain.nx
@@ -144,16 +149,16 @@ function CreateCells(domain, matNum, psi0)
 end
 
 
-function UpdatePressures(cell, newP, solverParams)
+function UpdatePressures(cell::Array{Cell, 1}, newP::Array{Float64, 1}, solverParams::Solver)::Array{Cell, 1}
     for (i, ce) in enumerate(cell)
         # weighting between old modeled head and new modeled head, per iteration
-        ce.P = solverParams.f*newP[i] + (1.-solverParams.f)*ce.P        
+        ce.P = solverParams.f*newP[i] + (1.0-solverParams.f)*ce.P        
     end
     return cell
 end
 
 
-function SumFluxes(cell, material, domain)
+function SumFluxes(cell::Array{Cell, 1}, material::Array{Material, 1}, domain::Domain)
     # compute fluxes (for model output and final flow balance estimates)
     flowSum = Float64[]
     Qx = Float64[]
@@ -161,8 +166,8 @@ function SumFluxes(cell, material, domain)
     errorF = Float64[]
     for ce in cell
         push!(flowSum, ce.Q)                # initialize summations
-        push!(Qx, 0.)
-        push!(Qz, 0.)
+        push!(Qx, 0.0)
+        push!(Qz, 0.0)
     end
     for (i, ce) in enumerate(cell)
         matI = material[ce.matNum]        
@@ -192,7 +197,7 @@ end
 ### matrix operations functions
 
 
-function LHS_matrix(cell, material, domain)
+function LHS_matrix(cell::Array{Cell, 1}, material::Array{Material, 1}, domain::Domain)
     # fill out the LHS of the equation matrix
     row_index = Int64[]                     # indexing system for sparse matrix
     col_index = Int64[]
@@ -229,7 +234,7 @@ function LHS_matrix(cell, material, domain)
 end
 
 
-function RHS_vector(cell, material, domain)
+function RHS_vector(cell::Array{Cell, 1}, material::Array{Material, 1}, domain::Domain)::Array{Float64, 1}
     # construct explicit matrix
     b = Float64[]
     for (i, ce) in enumerate(cell)          # for each row    
@@ -253,7 +258,7 @@ end
 ### input and output functions
 
 
-function ReadMaterials()
+function ReadMaterials()::Array{Material, 1}
     # read various model parameters from file
     material = Material[]
     data = readdlm("materials.txt", '\t', header=true)
@@ -272,7 +277,7 @@ function ReadMaterials()
 end
 
 
-function ReadSolverParams()
+function ReadSolverParams()::Solver
     # read numerical model "knobs" from file
     data = readdlm("solver.txt", '\t', header=false)
     psi0 = Float64(data[1, 2])
@@ -284,7 +289,7 @@ function ReadSolverParams()
 end
 
 
-function ReadDomain()
+function ReadDomain()::Domain
     # model geometry
     data = readdlm("domain.txt", '\t', header=false)
     xLength = Float64(data[1, 2])
@@ -302,7 +307,7 @@ function ReadDomain()
 end
 
 
-function ReadBlocks(cell, material)
+function ReadBlocks(cell::Array{Cell, 1}, material::Array{Material, 1})::Array{Cell, 1}
     # read and process rectangular material property heterogeneities
     data = readdlm("blocks.txt", '\t', header=true)
     for i = 1:size(data[1], 1)
@@ -323,7 +328,7 @@ function ReadBlocks(cell, material)
 end
 
 
-function ReadSources(cell, domain)
+function ReadSources(cell::Array{Cell, 1}, domain::Domain)::Array{Cell, 1}
     # read and process line sources/boundary conditions
     data = readdlm("sources.txt", '\t', header=true)
     for i = 1:size(data[1], 1)
@@ -360,45 +365,77 @@ function ReadSources(cell, domain)
 end
 
 
-function Spatial(domain, material, solverParams)
+function ReadCells(cell::Array{Cell, 1})::Array{Cell, 1}
+	# read in cell properties line by line
+    data = readdlm("cells.txt", '\t', header=true)
+    for i = 1:size(data[1], 1)
+        indx = Int64(data[1][i, 1])
+        cell[indx].P = Float64(data[1][i, 4])
+        cell[indx].Q = Float64(data[1][i, 5])
+        cell[indx].matNum = Int64(data[1][i, 6])
+        cell[indx].fixed = Bool(data[1][i, 7])
+    end
+    println("Read individual cell properties.")
+    return cell	
+end
+
+
+function Spatial(domain::Domain, material::Array{Material, 1}, solverParams::Solver, readMode::Int64)::Array{Cell, 1}
     # set up the model spatial domain
     matNum = GetMatNum(material, domain.defaultMat)                 # default material index number
     cell = CreateCells(domain, matNum, solverParams.psi0)           # create grid cells
-    cell = ReadBlocks(cell, material)                               # read blocks file and update cell material assignments, as warranted
-    cell = ReadSources(cell, domain)                                # read and assign sources/boundary conditions
+    if readMode == 1
+		# apply simple heterogeneities (blocks)
+		cell = ReadBlocks(cell, material)                           # read blocks file and update cell material assignments, as warranted
+		cell = ReadSources(cell, domain)                            # read and assign sources/boundary conditions
+	else
+		# complex heterogeneities (cell-by-cell)
+		cell = ReadCells(cell)
+	end
     println("Set up model cells and distributed properties.")
     return cell
 end
 
 
-function WriteOutput(cell, material, domain, fileName)
+function WriteOutput(cell::Array{Cell, 1}, material::Array{Material, 1}, domain::Domain, fileName::AbstractString)
     # write property distribution to file
     csvfile = open(fileName,"w")
     flowImbalance = Float32[]
     Qx, Qz, errorF = SumFluxes(cell, material, domain)              # update flow balance estimates
-    line_out = "cell" * "," * "x" * "," * "z" * "," * "psi" * "," * "S" * "," * "Qx" * "," * "Qz" * "," * "error"
+    line_out = "cell" * "," * "x" * "," * "z" * "," * "psi" * "," * "h" * "," *
+        "K_eff_h" * "," * "K_eff_z" * "," * "S" * "," * "Qx" * "," * "Qz" * "," * "error"
     println(csvfile, line_out)
     for (i, ce) in enumerate(cell)
         sat = S(ce.P, material[ce.matNum])
-        line_out = string(i) * "," * string(ce.x) * "," * string(ce.z) * "," * string(ce.P) * "," * string(sat) * "," * string(Qx[i]) * "," * string(Qz[i]) * "," * string(errorF[i])
+        k_rel = kr(ce.P, material[ce.matNum])
+        K_eff_h = material[ce.matNum].Kh * k_rel
+        K_eff_z = material[ce.matNum].Kz * k_rel
+        line_out = string(i) * "," * string(ce.x) * "," * string(ce.z) * "," * string(ce.P) * "," * string(ce.z+ce.P) * "," *
+            string(K_eff_h) * "," * string(K_eff_z) * "," * string(sat) * "," * string(Qx[i]) * "," * string(Qz[i]) * "," * string(errorF[i])
         println(csvfile,line_out)
     end
     close(csvfile)
     println("Wrote " * fileName * ".")
-    return mean(abs(errorF)), maximum(abs(errorF))
+    if fileName == "final_estimates.csv"
+        quants = [0.01, 0.05, 0.1, 0.25, 0.5, 0.75, 0.9, 0.95, 0.99]
+        errors = quantile(errorF, quants)
+        return quants, errors
+    else
+        return [0.], [0.]
+    end
 end
 
 
 ### main ###
 
 
-function Unsat()
+function Unsat(readMode::Int64)
 
     # problem setup
     domain = ReadDomain()
     material = ReadMaterials()
     solverParams = ReadSolverParams()
-    cell = Spatial(domain, material, solverParams)
+    cell = Spatial(domain, material, solverParams, readMode)
     
     # write initial conditions to file
     fileName = "starting_estimates.csv"
@@ -420,12 +457,15 @@ function Unsat()
     
     # write model results to file
     fileName = "final_estimates.csv"
-    errorMean, errorMax = WriteOutput(cell, material, domain, fileName)
-    println("Mean absolute flow imbalance = ", errorMean)
-    println("Max. absolute flow imbalance = ", errorMax)    
+    quants, errors = WriteOutput(cell, material, domain, fileName)
+    println("Quantile", "\t", "Error (norm.)")
+    for i = 1:length(quants)
+        println(quants[i], "\t", errors[i])
+    end
     println("Finished.")
 
 end
 
-
-Unsat()             ### run model ###
+### run model ###
+readMode = 2
+Unsat(readMode)             
